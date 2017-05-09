@@ -10,6 +10,9 @@
 -type a_pair() :: {atom(), atom()}.
 -type hetero_list() :: [atom() | integer() | binary()].
 
+%%-define(dbg(DbgMsg, Args), io:format(DbgMsg, Args)).
+-define(dbg(DbgMsg, Args), noop).
+
 -record(baby_boy, {
           birthday :: {Mega :: integer(), Secs :: integer(), Milli :: integer()}
          }).
@@ -56,7 +59,9 @@ monolithic_record_roundtrip_test() ->
                },
 
     JSON = jsx:encode(aeon:record_to_jsx(Record, ?MODULE)),
+    ?dbg("JSON = ~p~n",[JSON]),
     RoundtripRecord = aeon:to_record(jsx:decode(JSON), ?MODULE, big_boy),
+    ?dbg("RoundtripRecord = ~p~n", [RoundtripRecord]),
     ?assertMatch(Record, RoundtripRecord).
 
 record_with_null_roundtrip_test() ->
