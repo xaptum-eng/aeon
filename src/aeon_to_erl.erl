@@ -6,109 +6,117 @@
 	 to_type/3
 	]).
 
+%%-define(dbg(DbgMsg, Args), io:format(DbgMsg, Args)).
+-define(dbg(DbgMsg, Args), noop).
+
 to_record(Proplist, Module, RecordType) ->
-	FieldTypes = aeon_common:field_types(Module, {record, RecordType}),
-	NewRec = new_rec(Module, RecordType),
-	rec_field_convert(NewRec, Proplist, Module, FieldTypes).
+    FieldTypes = aeon_common:field_types(Module, {record, RecordType}),
+    ?dbg("FieldTypes = ~p~n", [FieldTypes]),
+    NewRec = new_rec(Module, RecordType),
+    ?dbg("NewRec = ~p~n", [NewRec]),
+    rec_field_convert(NewRec, Proplist, Module, FieldTypes).
 
 to_type(Jsx, Module, Type) ->
-	TypeSpec = aeon_common:field_types(Module, {type, Type}),
-	validated_field_value(Jsx, TypeSpec, Module).
+    TypeSpec = aeon_common:field_types(Module, {type, Type}),
+    validated_field_value(Jsx, TypeSpec, Module).
 
 
 rec_field_convert(BuildRec, _Proplist, _RecordModule, []) ->
-	BuildRec;
+    BuildRec;
 rec_field_convert(BuildRec, Proplist, RecordModule, [{FieldName, FieldType} | FieldTypes]) ->
-	case aeon_common:is_excluded_field(FieldType) of
-		true ->
-			rec_field_convert(BuildRec, Proplist, RecordModule, FieldTypes);
+    ?dbg("BuildRec = ~p, Proplist = ~p, RecordModule = ~p, FieldName = ~p, FieldType = ~p, FieldTypes = ~p~n", [BuildRec, Proplist, RecordModule, FieldName, FieldType, FieldTypes]),
+    case aeon_common:is_excluded_field(FieldType) of
+	true ->
+	    rec_field_convert(BuildRec, Proplist, RecordModule, FieldTypes);
+	false ->
+	    BinName = atom_to_binary(FieldName, utf8),
+	    case lists:keytake(BinName, 1, Proplist) of
 		false ->
-			BinName = atom_to_binary(FieldName, utf8),
-			case lists:keytake(BinName, 1, Proplist) of
-				false ->
-					% not a match for this record type,
-					% try the next one in the type spec
-					% unless aeon:optional_field() is in the typespec
-					case aeon_common:is_optional_field(FieldType) of
-						false ->
-							throw(try_again);
-						true ->
-							rec_field_convert(
-								BuildRec,
-								Proplist,
-								RecordModule,
-								FieldTypes)
-					end;
-				{value, {_, FieldValue}, NewProplist} ->
-					Value = try
-								validated_field_value(FieldValue, FieldType, RecordModule)
-							catch
-								throw:all_failed ->
-									throw({conversion_error, FieldName, FieldType, FieldValue})
-							end,
-					rec_field_convert(
-						set_field(FieldName, Value, RecordModule, BuildRec),
-						NewProplist,
-						RecordModule,
-						FieldTypes)
-			end
-	end.
+						% not a match for this record type,
+						% try the next one in the type spec
+						% unless aeon:optional_field() is in the typespec
+		    case aeon_common:is_optional_field(FieldType) of
+			false ->
+			    throw(try_again);
+			true ->
+			    rec_field_convert(
+			      BuildRec,
+			      Proplist,
+			      RecordModule,
+			      FieldTypes)
+		    end;
+		{value, {_, FieldValue}, NewProplist} ->
+		    Value = try
+				validated_field_value(FieldValue, FieldType, RecordModule)
+			    catch
+				throw:all_failed ->
+				    throw({conversion_error, FieldName, FieldType, FieldValue})
+			    end,
+		    rec_field_convert(
+		      set_field(FieldName, Value, RecordModule, BuildRec),
+		      NewProplist,
+		      RecordModule,
+		      FieldTypes)
+	    end
+    end.
 
+validated_field_value(Val, _FieldType, _Mod) when Val == <<"undefined">> ->
+    undefined;   %% all attributes can be undefined
 validated_field_value(Val, {type, integer}, _Mod) when is_integer(Val) ->
-	Val;
+    Val;
 validated_field_value(Val, {type, float}, _Mod) when is_float(Val) ->
-	Val;
+    Val;
 validated_field_value(Val, {type, float}, _Mod) when is_integer(Val) ->
-	float(Val);
+    float(Val);
 validated_field_value(Val, {type, boolean}, _Mod) when is_boolean(Val) ->
-	Val;
+    Val;
 validated_field_value(Val, {type, binary}, _Mod) when is_binary(Val) ->
-	Val;
+    Val;
 validated_field_value(Val, {type, string}, _Mod) when is_binary(Val) -> % jsx only returns binaries.  Autoconvert if requested
-	unicode:characters_to_list(Val);
+    unicode:characters_to_list(Val);
 validated_field_value(Val, {type, atom}, _Mod) when is_atom(Val) -> % what will this really catch?  JSX only converts true, false, null to atoms
-	Val;
+    Val;
 validated_field_value(Val, T={type, atom}, _Mod) when is_binary(Val) -> % jsx only converts true, false, null to Erlang atoms
-	case catch binary_to_existing_atom(Val, utf8) of
-		A when is_atom(A) -> A;
-		_ -> throw({no_conversion, Val, T})
-	end;
+    case catch binary_to_existing_atom(Val, utf8) of
+	A when is_atom(A) -> A;
+	_ -> throw({no_conversion, Val, T})
+    end;
 validated_field_value(Val, {type, Type}, Mod) when is_atom(Type) ->
-	to_type(Val, Mod, Type);
+    to_type(Val, Mod, Type);
 validated_field_value(Val, {type, {aeon, json_terms}}, _Mod) -> % return the terms as-is, expecting them to be converted later
-	Val;
+    Val;
 validated_field_value(Val, {type, {TMod, Type}}, _Mod) -> % Val is a proplist to be turned into a type
-	to_type(Val, TMod, Type);
+    to_type(Val, TMod, Type);
 validated_field_value(null, {atom, null}, _Mod) -> % jsx converts JSON null to 'null' atom
-	null;
+    null;
 validated_field_value(Val, {atom, A}, _Mod) when is_binary(Val) ->
-	case catch binary_to_existing_atom(Val, utf8) of
-		A -> A;
-		_ -> throw({no_conversion, Val, {atom, A}})
-	end;
+    case catch binary_to_existing_atom(Val, utf8) of
+	A -> A;
+	_ -> throw({no_conversion, Val, {atom, A}})
+    end;
 validated_field_value(Val, nil, _Mod) when is_list(Val) -> % 'nil' is the typespec []
-	Val;
+    Val;
 validated_field_value(Val, Any, _Mod) when Any =:= any; Any =:= term ->
-	Val;
+    Val;
 validated_field_value(Val, {record, RecType}, Mod) when is_list(Val), is_atom(RecType) -> % Val is a proplist to be turned into a record
-	to_record(Val, Mod, RecType);
+    to_record(Val, Mod, RecType);
 validated_field_value(Val, {list, []}, _Mod) when is_list(Val) -> % untyped list
-	Val;
+    Val;
 validated_field_value(Val, {list, LType}, Mod) when is_list(Val) ->
-	[validated_field_value(V, LType, Mod) || V <- Val];
+    [validated_field_value(V, LType, Mod) || V <- Val];
 validated_field_value(Val, {union, UTypes}, Mod) ->
-	Validator = fun(T) -> validated_field_value(Val, T, Mod) end,
-	aeon_common:first_no_fail(Validator, UTypes);
+    Validator = fun(T) -> validated_field_value(Val, T, Mod) end,
+    aeon_common:first_no_fail(Validator, UTypes);
 validated_field_value(Val, {tuple, TTypes}, Mod) when is_list(Val) -> % erlang tuple as json list and vice versa
-	ValidatedList = [validated_field_value(V, T, Mod) || {V,T} <- lists:zip(Val, TTypes)],
-	list_to_tuple(ValidatedList);
+    ValidatedList = [validated_field_value(V, T, Mod) || {V,T} <- lists:zip(Val, TTypes)],
+    list_to_tuple(ValidatedList);
 validated_field_value(Val, Type, Mod) ->
-	throw({no_conversion, Val, {Mod, Type}}).
+    throw({no_conversion, Val, {Mod, Type}}).
 
 set_field(Field, Value, RecMod, Record) ->
-	RecMod:'#set-'([{Field, Value}], Record).
+    RecMod:'#set-'([{Field, Value}], Record).
 
 new_rec(ModuleName, TypeName) ->
-	Constructor = list_to_atom("#new-" ++ atom_to_list(TypeName)),
-	ModuleName:Constructor().
+    Constructor = list_to_atom("#new-" ++ atom_to_list(TypeName)),
+    ModuleName:Constructor().
 
