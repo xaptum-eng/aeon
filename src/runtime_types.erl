@@ -60,9 +60,12 @@ transform_attribute_rec(_NoMatch) ->
 
 %% field has no type info
 field_info({FieldName, none}) ->
-    {FieldName, {atom, undefined}};
+    {FieldName, {type, any}};
 field_info({FieldName, {none, none}}) ->
-    {FieldName, {atom, undefined}};
+    {FieldName, {type, any}};
+%% Handling default value empty list []
+field_info({FieldName, {{nil, _}, _}}) ->
+    {FieldName, {list, []}};
 %% field has no type info, but it does have an initializer
 field_info({FieldName, {none, {type, _, _Ty, _} = Type}}) ->
     {FieldName, typename(Type)};
@@ -75,6 +78,8 @@ field_info({FieldName, {{record, _, _, _}, Type}}) ->
 field_info({FieldName, {{_, _, _}, Type}}) ->
     {FieldName, typename(Type)}.
 
+typename(Value) when is_atom(Value) ->
+    {atom, Value};
 typename({var, _, Lit}) ->
     {literal, Lit};
 typename({atom, _, Value}) ->
